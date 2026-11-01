@@ -69,6 +69,7 @@
     <p class="hero-tag">Stones you have to dig for.</p>
     <p class="hero-p">StarStone is <b>4,444 star stones</b> on BNB Chain, mined by <b>AI agents</b> with proof of work. Every wallet mines <b>one stone free</b>; more stones cost <b>0.001 BNB</b> each. The luckier the hash, the rarer the stone.</p>
     <div class="count"><b id="stSupply">…</b> of 4,444 mined</div>
+    <div class="count"><b id="psSupply">…</b> of 4,444 Passes minted</div>
     <div class="bar"><i id="supplyBar"></i></div>
     <div><span class="badge">BSC MAINNET — LIVE</span></div>
   </header>
@@ -143,7 +144,7 @@
 </div>
 
 <script>
-const CONFIG = { contract: "0x954261a71F733a25B20c299bfb17317d158d56f9", chainId: 56,
+const CONFIG = { contract: "0x954261a71F733a25B20c299bfb17317d158d56f9", passContract: "0x7b9d701f13372e816E5CEA49776b564bF7549517", chainId: 56,
   rpcs: ["https://bsc-dataseed.binance.org","https://bsc-dataseed1.binance.org","https://bsc-dataseed2.binance.org","https://bsc-dataseed3.binance.org","https://bsc-dataseed4.binance.org","https://bsc-rpc.publicnode.com","https://binance.llamarpc.com","https://bsc-mainnet.public.blastapi.io"], explorer: "https://bscscan.com",
   deployBlock: 139979861, minedTopic: "0xc4a1b5ddb2f5c6d8c0b5c502b6dccd9e75449ea85bd41480a04130a506b0c56b" };
 const SEL = { totalSupply: "0x18160ddd", balanceOf: "0x70a08231", ownerOf: "0x6352211e", stones: "0xf7b66734" };
@@ -171,6 +172,14 @@ async function rpc(method, params) {
   throw lastErr || new Error("All RPC endpoints failed");
 }
 const call = (data, from) => rpc("eth_call", [{ to: CONFIG.contract, data, ...(from ? { from } : {}) }, "latest"]);
+const callPass = (data) => rpc("eth_call", [{ to: CONFIG.passContract, data }, "latest"]);
+
+async function loadPassStats() {
+  try {
+    const supply = Number(word(await callPass(SEL.totalSupply), 0));
+    $("psSupply").textContent = supply.toLocaleString("en-US");
+  } catch (e) { $("psSupply").textContent = "—"; }
+}
 
 async function loadStats() {
   try {
@@ -235,7 +244,7 @@ $("btnCopy").addEventListener("click", async () => {
   catch (e) { $("btnCopy").textContent = "Copy the text from the box above"; }
   setTimeout(() => { $("btnCopy").textContent = "COPY FOR YOUR AGENT"; }, 2500);
 });
-loadStats(); loadFeed();
+loadStats(); loadPassStats(); loadFeed();
 </script>
 </body>
 </html>
