@@ -137,7 +137,7 @@ async function getAllLogs() {
   return out;
 }
 
-async function load() {
+async function loadScan() {
   try {
     const logs = await getAllLogs();
     const mines = logs.map(l => ({
@@ -191,6 +191,43 @@ async function load() {
     $("board").innerHTML = '<tr><td colspan="5" class="dim">Could not load.</td></tr>';
     $("feed").innerHTML = '<tr><td colspan="6" class="dim">Could not load.</td></tr>';
   }
+}
+async function loadFast() {
+  const r = await fetch("https://areax2.github.io/starstone/mining-data.json", { cache: "no-store" });
+  if (!r.ok) throw new Error("summary unavailable");
+  const d = await r.json();
+  $("rTotal").textContent = Number(d.totalMines).toLocaleString("en-US");
+  $("rMiners").textContent = Number(d.miners.length).toLocaleString("en-US");
+  $("rBest").textContent = d.totalMines ? d.bestBits + " bit" : "—";
+  $("rFree").textContent = d.freeCount + " / " + d.paidCount;
+  const era = Math.floor(d.maxId / 1111) + 1, inEra = d.maxId - (era - 1) * 1111;
+  $("eraNow").textContent = "Era " + era;
+  $("eraProgress").textContent = inEra + " of the 1,111 stones of this era have been mined.";
+  $("eraBar").style.width = Math.max(0.3, inEra / 1111 * 100) + "%";
+  const maxC = Math.max(1, ...d.tierCounts);
+  $("tierBars").innerHTML = TIERS.map((t, i) =>
+    '<div class="tierbar"><span class="nm"><img class="gemdot" src="' + GEMIMG[i] + '">' + t + '</span>' +
+    '<span class="bar"><i style="width:' + (d.tierCounts[i] / maxC * 100) + '%"></i></span>' +
+    '<span class="ct">' + d.tierCounts[i] + '</span></div>').join("");
+  $("board").innerHTML = d.miners.length ? d.miners.map((m, i) => { const medal = ["🥇","🥈","🥉"][i] || String(i + 1); return (
+    '<tr><td class="medal">' + medal + '</td>' +
+    '<td><a href="' + CONFIG.explorer + '/address/' + m.miner + '" target="_blank" rel="noopener">' + short(m.miner) + '</a></td>' +
+    '<td>' + m.count + '</td><td>' + m.best + '</td>' +
+    '<td><img class="gemdot" src="' + GEMIMG[m.tier] + '">' + TIERS[m.tier] + '</td></tr>'); }).join("")
+    : '<tr><td colspan="5" class="dim">No mines recorded yet.</td></tr>';
+  $("feed").innerHTML = d.recent.length ? d.recent.map(m =>
+    '<tr><td><b>#' + m.id + '</b></td>' +
+    '<td><img class="gemdot" src="' + GEMIMG[m.tier] + '">' + TIERS[m.tier] + '</td>' +
+    '<td>' + m.bits + '</td>' +
+    '<td><a href="' + CONFIG.explorer + '/address/' + m.miner + '" target="_blank" rel="noopener">' + short(m.miner) + '</a></td>' +
+    '<td><span class="pill' + (m.free ? ' free' : '') + '">' + (m.free ? 'FREE' : 'PAID') + '</span></td>' +
+    '<td><a href="' + (m.tx ? CONFIG.explorer + '/tx/' + m.tx : CONFIG.explorer + '/token/' + CONFIG.contract + '?a=' + m.id) + '" target="_blank" rel="noopener">view ↗</a></td></tr>').join("")
+    : '<tr><td colspan="6" class="dim">No mines recorded yet.</td></tr>';
+}
+
+async function load() {
+  try { await loadFast(); }
+  catch (e) { await loadScan(); }
 }
 load();
 </script>
