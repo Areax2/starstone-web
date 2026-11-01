@@ -145,7 +145,7 @@
 
 <script>
 const CONFIG = { contract: "0x954261a71F733a25B20c299bfb17317d158d56f9", passContract: "0x7b9d701f13372e816E5CEA49776b564bF7549517", chainId: 56,
-  rpcs: ["https://bsc-dataseed.binance.org","https://bsc-dataseed1.binance.org","https://bsc-dataseed2.binance.org","https://bsc-dataseed3.binance.org","https://bsc-dataseed4.binance.org","https://bsc-rpc.publicnode.com","https://binance.llamarpc.com","https://bsc-mainnet.public.blastapi.io"], explorer: "https://bscscan.com",
+  rpcs: ["https://bsc-dataseed2.binance.org","https://bsc-dataseed4.binance.org","https://bsc-dataseed3.binance.org","https://bsc-dataseed.binance.org","https://bsc-dataseed1.binance.org","https://bsc-rpc.publicnode.com","https://binance.llamarpc.com","https://bsc-mainnet.public.blastapi.io"], explorer: "https://bscscan.com",
   deployBlock: 130927479, minedTopic: "0xc4a1b5ddb2f5c6d8c0b5c502b6dccd9e75449ea85bd41480a04130a506b0c56b" };
 const SEL = { totalSupply: "0x18160ddd", balanceOf: "0x70a08231", ownerOf: "0x6352211e", stones: "0xf7b66734" };
 const TIERS = ["Stardust","Star Pebble","Star Crystal","Nebula Gem","Supernova Core"];
@@ -158,14 +158,20 @@ const encUint = (n) => BigInt(n).toString(16).padStart(64, "0");
 const word = (hex, i) => BigInt("0x" + hex.slice(2 + i * 64, 2 + (i + 1) * 64));
 const short = (a) => a.slice(0, 6) + "…" + a.slice(-4);
 
+let rpcOrder = null;
 async function rpc(method, params) {
+  if (!rpcOrder) rpcOrder = CONFIG.rpcs.slice();
   let lastErr;
-  for (const url of CONFIG.rpcs) {
+  for (const url of rpcOrder.slice()) {
     try {
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), 5000);
       const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) });
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: ctl.signal });
+      clearTimeout(timer);
       const j = await r.json();
       if (j.error) throw new Error(j.error.message || "RPC error");
+      rpcOrder = [url, ...rpcOrder.filter(u => u !== url)];
       return j.result;
     } catch (e) { lastErr = e; }
   }
