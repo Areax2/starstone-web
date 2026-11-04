@@ -389,7 +389,7 @@ let LISTED = null;
 let scanDone = false;
 const FILTER = { tiers: new Set(), sort: "asc", maxPrice: "", minBits: 0 };
 function cardHTML(it) {
-  return '<div class="stone"><img class="gemimg" src="https://areax2.github.io/starstone/metadata/images/' + it.id + '.png" ' +
+  return '<div class="stone"><img class="gemimg" loading="lazy" width="84" height="84" src="https://areax2.github.io/starstone/metadata/images/' + it.id + '.png" ' +
     'onerror="this.onerror=null;this.src=GEMIMG[' + it.tier + '];"><br><b>Stone #' + it.id + '</b><br>' +
     TIERS[it.tier] + '<br><span class="dim small">' + it.bits + ' bits · Era ' + it.era + '</span>' +
     '<span class="price">' + fmtBNB(it.price) + ' BNB</span>' +
