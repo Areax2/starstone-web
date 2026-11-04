@@ -123,6 +123,7 @@
       </div>
       <p class="fcount" id="fCount"></p>
     </div>
+    <p class="note" id="cacheNote" style="display:none"></p>
     <div class="stones" id="listings"><div class="emptybox">Reading the market from BNB Chain…</div></div>
     <p class="note" style="margin-top:12px">Prices are set by each seller. The seller receives <b>95%</b> of the price; <b>5%</b> is the project fee. Listings can be cancelled by the seller at any time.</p>
   </section>
@@ -141,8 +142,9 @@
     <h2>Recent sales</h2>
     <table>
       <tr><th>Stone</th><th>Tier</th><th>Price</th><th>Seller</th><th>Buyer</th></tr>
-      <tbody id="sales"><tr><td colspan="5" class="dim">Loading…</td></tr></tbody>
+      <tbody id="sales"><tr><td colspan="5" class="dim">Not loaded yet.</td></tr></tbody>
     </table>
+    <button class="btn" id="btnSales">LOAD RECENT SALES</button>
   </section>
 
   <section class="card">
@@ -190,7 +192,7 @@ async function rpc(method, params) {
   for (const url of rpcOrder.slice()) {
     try {
       const ctl = new AbortController();
-      const timer = setTimeout(() => ctl.abort(), 5000);
+      const timer = setTimeout(() => ctl.abort(), 3000);
       const r = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: ctl.signal });
       clearTimeout(timer);
@@ -217,64 +219,155 @@ async function paintFromSummary() {
   } catch (e) { /* the on-chain loader below fills it in */ }
 }
 
-async function loadListings() {
+/* ===== Listings: localStorage snapshot + progressive parallel loading ===== */
+const CACHE_KEY = "ssMarketCacheV1";
+function readCache() {
   try {
-    const supply = Number(word(await call(SEL.totalSupply), 0));
-    $("stSupply").textContent = supply.toLocaleString("en-US");
-    const listed = [];
-    for (let id = 1; id <= supply; id++) {
-      const l = await call(SEL.listings + encUint(id));
-      const seller = "0x" + l.slice(-104, -64), price = word(l, 1);
-      if (price > 0n) listed.push({ id, seller, price });
-    }
-    for (const it of listed) {
-      const s = await call(SEL.stones + encUint(it.id));
-      it.tier = Number(word(s, 0)); it.bits = Number(word(s, 1)); it.era = Number(word(s, 2));
-    }
-    listed.sort((a, b) => (a.price < b.price ? -1 : a.price > b.price ? 1 : a.id - b.id));
-    $("mktCount").textContent = listed.length;
-    $("mListings").textContent = listed.length;
-    $("mFloor").textContent = listed.length ? fmtBNB(listed[0].price) + " BNB" : "—";
-    LISTED = listed;
-    applyFilters();
-  } catch (e) {
-    $("listings").innerHTML = '<div class="emptybox">Could not read the market right now. Please reload in a moment.</div>';
-    $("mktCount").textContent = "—"; $("mListings").textContent = "—"; $("mFloor").textContent = "—";
+    const d = JSON.parse(localStorage.getItem(CACHE_KEY) || "null");
+    if (!d || !Array.isArray(d.items)) return null;
+    d.items = d.items.map(it => ({ id: it.id, seller: it.seller, price: BigInt(it.price),
+      tier: it.tier, bits: it.bits, era: it.era }));
+    return d;
+  } catch (e) { return null; }
+}
+function saveCache(supply, items) {
+  try {
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ ts: Date.now(), supply,
+      items: items.map(it => ({ id: it.id, seller: it.seller, price: it.price.toString(),
+        tier: it.tier, bits: it.bits, era: it.era })) }));
+  } catch (e) { /* storage unavailable — the page simply loads live every time */ }
+}
+function showCacheNote(ts) {
+  const d = new Date(ts);
+  const el = $("cacheNote");
+  el.textContent = "Last updated " + String(d.getHours()).padStart(2, "0") + ":" + String(d.getMinutes()).padStart(2, "0");
+  el.style.display = "";
+}
+async function tryCall(data) {
+  for (let a = 0; a < 2; a++) {
+    try { return await call(data); } catch (e) { /* one retry, then give up on this call */ }
   }
+  return null;
+}
+async function runPool(count, size, worker) {
+  let next = 0;
+  const runners = [];
+  for (let k = 0; k < Math.min(size, count); k++) runners.push((async () => {
+    while (next < count) { const id = ++next; await worker(id); }
+  })());
+  await Promise.all(runners);
+}
+function updateCounters() {
+  const items = LISTED || [];
+  $("mktCount").textContent = items.length;
+  $("mListings").textContent = items.length;
+  let floor = null;
+  for (const it of items) if (floor === null || it.price < floor) floor = it.price;
+  $("mFloor").textContent = floor !== null ? fmtBNB(floor) + " BNB" : (scanDone ? "—" : "…");
+}
+function publishListed(display) {
+  LISTED = [...display.values()].sort((a, b) => (a.price < b.price ? -1 : a.price > b.price ? 1 : a.id - b.id));
+  applyFilters();
+  updateCounters();
 }
 
-async function getLogs(topic) {
+async function loadListings() {
+  const display = new Map();
+  const cache = readCache();
+  if (cache) {
+    for (const it of cache.items) display.set(it.id, it);
+    publishListed(display);
+    showCacheNote(cache.ts);
+    if (cache.supply) $("stSupply").textContent = Number(cache.supply).toLocaleString("en-US");
+  }
+  let supply = 0;
+  try { supply = Number(word(await call(SEL.totalSupply), 0)); } catch (e) { /* keep any cached snapshot */ }
+  if (!supply) {
+    scanDone = true;
+    if (!cache) {
+      $("listings").innerHTML = '<div class="emptybox">Could not read the market right now. Please reload in a moment.</div>';
+      $("mktCount").textContent = "—"; $("mListings").textContent = "—"; $("mFloor").textContent = "—";
+    }
+    return;
+  }
+  $("stSupply").textContent = supply.toLocaleString("en-US");
+  for (const id of [...display.keys()]) if (id > supply) display.delete(id);
+  if (!cache) publishListed(display); // LISTED = [] — grid shows its reading state, counters at 0
+  await runPool(supply, 8, async (id) => {
+    const l = await tryCall(SEL.listings + encUint(id));
+    if (l === null || l.length < 130) return; // unreadable right now — keep any cached entry, move on
+    const price = word(l, 1);
+    if (price <= 0n) {
+      if (display.delete(id)) publishListed(display);
+      return;
+    }
+    const seller = "0x" + l.slice(-104, -64);
+    const prev = display.get(id);
+    if (prev && prev.price === price && prev.seller.toLowerCase() === seller.toLowerCase()) return; // unchanged — details already known
+    const s = await tryCall(SEL.stones + encUint(id));
+    if (s === null || s.length < 386) return; // keep any cached entry; otherwise this stone is skipped
+    display.set(id, { id, seller, price, tier: Number(word(s, 0)), bits: Number(word(s, 1)), era: Number(word(s, 2)) });
+    publishListed(display);
+  });
+  scanDone = true;
+  publishListed(display);
+  saveCache(supply, LISTED);
+  showCacheNote(Date.now());
+}
+
+/* Bounded log scan: newest blocks first (recent sales surface first), one pass,
+   at most 2 attempts per chunk, and a hard deadline — never an open-ended loop. */
+async function getLogsBackwards(topic, deadline) {
   const latest = Number(BigInt(await rpc("eth_blockNumber", [])));
+  if (Date.now() > deadline) throw new Error("sales scan timed out");
   const out = [];
-  for (let s = CONFIG.deployBlock; s <= latest; s += 5000) {
-    const e = Math.min(s + 4999, latest);
-    let chunk = null, lastErr = null;
-    for (let attempt = 0; attempt < 4 && chunk === null; attempt++) {
+  let complete = false;
+  for (let e = latest; e >= CONFIG.deployBlock; e -= 5000) {
+    const s = Math.max(CONFIG.deployBlock, e - 4999);
+    let chunk = null;
+    for (let attempt = 0; attempt < 2 && chunk === null; attempt++) {
+      if (Date.now() > deadline) break;
       try {
         chunk = await rpc("eth_getLogs", [{ address: CONFIG.contract, topics: [topic],
           fromBlock: "0x" + s.toString(16), toBlock: "0x" + e.toString(16) }]);
-      } catch (err) { lastErr = err; await new Promise(r => setTimeout(r, 900 * (attempt + 1))); }
+      } catch (err) { /* at most one retry, and only within the deadline */ }
     }
-    if (chunk === null) throw lastErr || new Error("log scan failed");
+    if (chunk === null) {
+      if (Date.now() > deadline) break; // out of time — return what was found
+      throw new Error("log scan failed");
+    }
     out.push(...chunk);
+    if (s <= CONFIG.deployBlock) { complete = true; break; }
   }
-  return out;
+  return { logs: out, complete };
 }
 
+/* Recent sales load ONLY on demand (button click): one bounded scan, ~12 s hard cap.
+   Totals in "Market in numbers" are filled in only when the scan covered the full
+   range back to the deploy block; otherwise they stay "—" rather than show a
+   partial sum as if it were the total. Found sales are always shown. */
+let salesBusy = false;
 async function loadSales() {
+  if (salesBusy) return;
+  salesBusy = true;
+  const btn = $("btnSales");
+  btn.disabled = true; btn.textContent = "Loading…";
+  $("sales").innerHTML = '<tr><td colspan="5" class="dim">Loading…</td></tr>';
+  const deadline = Date.now() + 12000;
   try {
-    const logs = await getLogs(SOLD_TOPIC);
+    const { logs, complete } = await getLogsBackwards(SOLD_TOPIC, deadline);
     const sales = logs.map(l => ({ id: Number(BigInt(l.topics[1])),
       seller: "0x" + l.topics[2].slice(-40), buyer: "0x" + l.topics[3].slice(-40),
       price: word(l.data, 0), block: Number(BigInt(l.blockNumber)) })).sort((a, b) => b.block - a.block);
+    if (!complete && sales.length === 0) throw new Error("sales coverage incomplete");
     let vol = 0n; for (const s of sales) vol += s.price;
-    $("mSales").textContent = sales.length;
-    $("mVolume").textContent = fmtBNB(vol);
+    if (complete) { $("mSales").textContent = sales.length; $("mVolume").textContent = fmtBNB(vol); }
+    else { $("mSales").textContent = "—"; $("mVolume").textContent = "—"; }
     const tierOf = {};
     for (const s of sales.slice(0, 10)) {
       if (tierOf[s.id] === undefined) {
-        const st = await call(SEL.stones + encUint(s.id));
-        tierOf[s.id] = Number(word(st, 0));
+        const st = await tryCall(SEL.stones + encUint(s.id));
+        tierOf[s.id] = st && st.length >= 386 ? Number(word(st, 0)) : 0;
       }
       s.tier = tierOf[s.id];
     }
@@ -282,14 +375,18 @@ async function loadSales() {
       '<tr><td><b>#' + s.id + '</b></td><td><img class="gemdot" src="' + GEMIMG[s.tier] + '">' + TIERS[s.tier] + '</td>' +
       '<td>' + fmtBNB(s.price) + ' BNB</td><td>' + short(s.seller) + '</td><td>' + short(s.buyer) + '</td></tr>').join("")
       : '<tr><td colspan="5" class="dim">No sales yet — the first trade will appear here.</td></tr>';
+    btn.style.display = "none";
   } catch (e) {
-    $("sales").innerHTML = '<tr><td colspan="5" class="dim">Could not load sales history.</td></tr>';
+    $("sales").innerHTML = '<tr><td colspan="5" class="dim">Could not load sales history right now.</td></tr>';
     $("mSales").textContent = "—"; $("mVolume").textContent = "—";
+    btn.disabled = false; btn.textContent = "LOAD RECENT SALES";
   }
+  salesBusy = false;
 }
 
 /* ===== Buyer filters (client-side, over the listings loaded above) ===== */
 let LISTED = null;
+let scanDone = false;
 const FILTER = { tiers: new Set(), sort: "asc", maxPrice: "", minBits: 0 };
 function cardHTML(it) {
   return '<div class="stone"><img class="gemimg" src="https://areax2.github.io/starstone/metadata/images/' + it.id + '.png" ' +
@@ -317,7 +414,9 @@ function applyFilters() {
   $("fCount").textContent = "Showing " + items.length + " of " + LISTED.length + " stones";
   $("listings").innerHTML = items.length ? items.map(cardHTML).join("")
     : (LISTED.length === 0
-      ? '<div class="emptybox">No stones are listed yet.<br>Listings appear here as soon as a holder puts a stone up for sale.</div>'
+      ? (scanDone
+        ? '<div class="emptybox">No stones are listed yet.<br>Listings appear here as soon as a holder puts a stone up for sale.</div>'
+        : '<div class="emptybox">Reading the market from BNB Chain…</div>')
       : '<div class="emptybox">No stones match your filters.</div>');
 }
 function syncChips() {
@@ -350,7 +449,8 @@ $("btnCopy").addEventListener("click", async () => {
   catch (e) { $("btnCopy").textContent = "Copy the text from the box above"; }
   setTimeout(() => { $("btnCopy").textContent = "COPY FOR YOUR AGENT"; }, 2500);
 });
-(async () => { await paintFromSummary(); loadListings(); loadSales(); })();
+$("btnSales").addEventListener("click", loadSales);
+(async () => { paintFromSummary(); loadListings(); })();
 </script>
 </body>
 </html>
