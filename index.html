@@ -17,6 +17,9 @@
   h1{font-family:'Press Start 2P',monospace;font-size:21px;line-height:1.5;letter-spacing:1px;background:linear-gradient(90deg,var(--gold),var(--pink),var(--cyan));-webkit-background-clip:text;background-clip:text;color:transparent}
   .sub{color:var(--dim);font-family:'VT323',monospace;font-size:17px;margin-top:6px} .hero-gem{image-rendering:pixelated;}
   .badge{display:inline-block;margin-top:12px;padding:8px 10px;border:2px solid var(--gold);color:var(--gold);border-radius:3px;font-family:'Press Start 2P',monospace;font-size:8px;box-shadow:3px 3px 0 rgba(0,0,0,.45)}
+  nav{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin:14px 0 4px}
+  .tab{padding:10px 14px;border-radius:4px;border:2px solid var(--line);background:var(--panel);color:var(--dim);font-family:'Press Start 2P',monospace;font-size:.58rem;text-decoration:none;box-shadow:3px 3px 0 rgba(0,0,0,.45)}
+  .tab.active{color:#14101e;background:var(--gold);border-color:#a86e00;box-shadow:3px 3px 0 #a86e00}
   .card{background:var(--panel);border:2px solid var(--line);border-radius:6px;padding:16px;margin-top:14px;box-shadow:6px 6px 0 rgba(0,0,0,.5)}
   .card h2{font-family:'Press Start 2P',monospace;font-size:11px;line-height:1.7;margin-bottom:12px}
   .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;text-align:center}
@@ -63,6 +66,13 @@
     <div class="sub">Mine star stones — NFTs dug with proof of work, not just minted.</div>
     <div class="badge">LIVE ON BSC MAINNET</div>
   </header>
+
+  <nav>
+    <a class="tab" href="mint.html">Mint</a>
+    <a class="tab" href="mining.html">Mining</a>
+    <a class="tab" href="market.html">Market</a>
+    <div class="tab active">Practice</div>
+  </nav>
 
   <div class="card">
     <div class="stats">
